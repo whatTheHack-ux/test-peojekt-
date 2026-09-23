@@ -1,29 +1,39 @@
 #!/bin/bash
 set -euo pipefail
 
+# Download matching official SQLite distributions and prepare every source file
+# required by sqlite3recover. The amalgamation does not contain ext/recover.
 mkdir -p SQLite
-
-# Pin this to the SQLite release used by the project.
-# Update the version and SHA-3/SHA-256 verification when upgrading.
 VERSION="${SQLITE_VERSION:-3510100}"
-URL="https://www.sqlite.org/2026/sqlite-amalgamation-${VERSION}.zip"
+YEAR="${SQLITE_YEAR:-2026}"
+BASE_URL="https://www.sqlite.org/${YEAR}"
 
-curl -fL "$URL" -o /tmp/sqlite.zip
-unzip -o /tmp/sqlite.zip -d /tmp/sqlite-src
+AMALGAMATION="/tmp/sqlite-amalgamation-${VERSION}.zip"
+FULL_SOURCE="/tmp/sqlite-src-${VERSION}.zip"
+rm -rf "/tmp/sqlite-amalgamation-${VERSION}" "/tmp/sqlite-src-${VERSION}"
 
-SRC="/tmp/sqlite-src/sqlite-amalgamation-${VERSION}"
-cp "$SRC/sqlite3.c" SQLite/
-cp "$SRC/sqlite3.h" SQLite/
+curl --fail --location --show-error --silent \
+  "${BASE_URL}/sqlite-amalgamation-${VERSION}.zip" -o "$AMALGAMATION"
+unzip -q -o "$AMALGAMATION" -d /tmp
 
-# Recovery extension source files come from the corresponding SQLite source tree.
-# A full-source distribution is required for these files.
-FULL_URL="https://www.sqlite.org/2026/sqlite-src-${VERSION}.zip"
-curl -fL "$FULL_URL" -o /tmp/sqlite-src.zip
-unzip -o /tmp/sqlite-src.zip -d /tmp/sqlite-full
+AMALGAMATION_DIR="/tmp/sqlite-amalgamation-${VERSION}"
+cp "$AMALGAMATION_DIR/sqlite3.c" SQLite/sqlite3.c
+cp "$AMALGAMATION_DIR/sqlite3.h" SQLite/sqlite3.h
 
-FULL="/tmp/sqlite-full/sqlite-src-${VERSION}"
-cp "$FULL/ext/recover/sqlite3recover.c" SQLite/
-cp "$FULL/ext/recover/sqlite3recover.h" SQLite/
-cp "$FULL/ext/recover/dbdata.c" SQLite/
+# sqlite3recover.c, sqlite3recover.h and dbdata.c are only shipped in the
+# full-source archive and must come from the same SQLite release.
+curl --fail --location --show-error --silent \
+  "${BASE_URL}/sqlite-src-${VERSION}.zip" -o "$FULL_SOURCE"
+unzip -q -o "$FULL_SOURCE" -d /tmp
 
-echo "SQLite sources prepared."
+FULL_DIR="/tmp/sqlite-src-${VERSION}"
+for file in sqlite3recover.c sqlite3recover.h dbdata.c; do
+  cp "$FULL_DIR/ext/recover/$file" "SQLite/$file"
+done
+
+# Fail early if a future SQLite archive changes its layout.
+for file in sqlite3.c sqlite3.h sqlite3recover.c sqlite3recover.h dbdata.c; do
+  test -s "SQLite/$file" || { echo "Missing SQLite/$file" >&2; exit 1; }
+done
+
+echo "Prepared official SQLite ${VERSION} sources in SQLite/."
